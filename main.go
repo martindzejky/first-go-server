@@ -11,13 +11,13 @@ import (
 )
 
 type SleepResponse struct {
-    Time int
+    Time int `json:"sleep_ms"`
 }
 
 func main() {
 	port := "8080"
 
-	http.HandleFunc("/sleep", sleepHandler)
+	http.HandleFunc("/api/sleep", sleepHandler)
 
 	fmt.Println("Server listening on port", port)
 	http.ListenAndServe(":"+port, nil)
@@ -27,8 +27,8 @@ func sleepHandler(writer http.ResponseWriter, request *http.Request) {
 	fmt.Println("Received a request")
 
     query := request.URL.Query()
-    min := getQueryIntValue(query, "min", 1000)
-    max := getQueryIntValue(query, "max", 4000)
+    min := getQueryIntValue(query, "min", 100)
+    max := getQueryIntValue(query, "max", 300)
 
     // TODO: this is deterministic
     waitTime := rand.Intn(max - min) + min
