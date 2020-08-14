@@ -13,10 +13,13 @@ import (
 
 func main() {
 	port := "8080"
+	route := "/api/sleep"
 
+	log.Println("Seeding the random number generator")
 	rand.Seed(time.Now().UnixNano())
 
-	http.HandleFunc("/api/sleep", sleepHandler)
+	log.Println("Registering the \"" + route + "\" handler")
+	http.HandleFunc(route, sleepHandler)
 
 	log.Println("Server listening on port", port)
 	err := http.ListenAndServe(":"+port, nil)
@@ -44,6 +47,6 @@ func sleepHandler(writer http.ResponseWriter, request *http.Request) {
 	})
 
 	if err != nil {
-		log.Fatal("Error while writing the HTTP response", err)
+		log.Fatalln("Error while writing the HTTP response:", err)
 	}
 }
