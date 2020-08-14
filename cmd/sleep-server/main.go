@@ -2,13 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
 	"time"
 
-	"github.com/martindzejky/first-go-server/cmd/common"
 	"github.com/martindzejky/first-go-server/internal/http-utils"
+	"github.com/martindzejky/first-go-server/internal/responses"
 )
 
 func main() {
@@ -22,17 +23,20 @@ func main() {
 	http.HandleFunc(route, sleepHandler)
 
 	log.Println("Server listening on port", port)
-	err := http.ListenAndServe(":"+port, nil)
-
-	if err != nil {
-		log.Fatalln("Error while starting the server:", err)
-	}
+	log.Fatalln(http.ListenAndServe(":"+port, nil))
 }
 
-func sleepHandler(writer http.ResponseWriter, request *http.Request) {
+func sleepHandler(res http.ResponseWriter, req *http.Request) {
 	log.Println("Received a request")
 
-	query := request.URL.Query()
+	// there's a small chance that the request fails
+	if rand.Float32() < 0.05 {
+		res.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintln(res, "Simulated request failure")
+		return
+	}
+
+	query := req.URL.Query()
 	min := httpUtils.GetQueryIntValue(query, "min", 100)
 	max := httpUtils.GetQueryIntValue(query, "max", 300)
 
@@ -41,8 +45,8 @@ func sleepHandler(writer http.ResponseWriter, request *http.Request) {
 	log.Println("Sleeping for", waitTime, "ms")
 	time.Sleep(time.Duration(waitTime) * time.Millisecond)
 
-	writer.Header().Set("Content-Type", "application/json")
-	err := json.NewEncoder(writer).Encode(common.SleepResponse{
+	res.Header().Set("Content-Type", "application/json")
+	err := json.NewEncoder(res).Encode(responses.SleepResponse{
 		Time: waitTime,
 	})
 

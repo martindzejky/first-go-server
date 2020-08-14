@@ -3,12 +3,13 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
 
-	"github.com/martindzejky/first-go-server/cmd/common"
 	"github.com/martindzejky/first-go-server/internal/http-utils"
+	"github.com/martindzejky/first-go-server/internal/responses"
 )
 
 func main() {
@@ -20,11 +21,7 @@ func main() {
 
 	// start the server
 	log.Println("Starting the server on port", port)
-	err := http.ListenAndServe(":"+port, nil)
-
-	if err != nil {
-		log.Fatalln("Failed to listen on the port:", err)
-	}
+	log.Fatalln(http.ListenAndServe(":"+port, nil))
 }
 
 // handles the /api/all route - it waits for and returns all 3 responses
@@ -32,10 +29,15 @@ func apiAllRoute(res http.ResponseWriter, req *http.Request) {
 	log.Print("Received a request for 'all'")
 
 	timeout := httpUtils.GetQueryIntValue(req.URL.Query(), "timeout", 1000)
-	timeoutChannel := make(chan bool, 1)
+
+	// validate timeout
+	if timeout < 100 || timeout > 5000 {
+		res.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintln(res, "Incorrect value for timeout specified")
+	}
+
 	dataChannel := make(chan int, 3)
 	errorsChannel := make(chan error, 3)
-
 	values := make([]int, 0)
 
 	// make the 3 requests
@@ -44,12 +46,6 @@ func apiAllRoute(res http.ResponseWriter, req *http.Request) {
 		go makeRequestToSleepServer(dataChannel, errorsChannel)
 	}
 
-	// start the timer
-	go func() {
-		time.Sleep(time.Duration(timeout) * time.Millisecond)
-		timeoutChannel <- true
-	}()
-
 	// wait for values
 	for i := 0; i < 3; i++ {
 		select {
@@ -57,22 +53,19 @@ func apiAllRoute(res http.ResponseWriter, req *http.Request) {
 			log.Println("Received a value:", data)
 			values = append(values, data)
 
-		case err := <-errorsChannel:
-			log.Println("Received an error:", err)
-			res.WriteHeader(500)
-			res.Write([]byte("One of the requests failed"))
-			return
+		case <-errorsChannel:
+			log.Println("Received an error")
 
-		case <-timeoutChannel:
+		case <-time.After(time.Duration(timeout) * time.Millisecond):
 			log.Println("The requests did not make it in time, timeout reached")
-			res.WriteHeader(500)
-			res.Write([]byte("Timeout reached"))
+			res.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(res, "Timeout reached")
 			return
 		}
 	}
 
 	res.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(res).Encode(common.AllResponse{
+	json.NewEncoder(res).Encode(responses.AllResponse{
 		Times: values,
 	})
 }
@@ -82,22 +75,41 @@ func makeRequestToSleepServer(dataChannel chan<- int, errorChannel chan<- error)
 	res, err := http.Get("http://localhost:8080/api/sleep")
 
 	if err != nil {
-		errorChannel <- err
+		select {
+		case errorChannel <- err:
+		default:
+			log.Println("Failed to write to errorChannel")
+		}
+
 		return
 	}
 
 	if res.StatusCode != 200 {
-		errorChannel <- errors.New("The sleep server returned an error: " + res.Status)
+		select {
+		case errorChannel <- errors.New("The sleep server returned an error: " + res.Status):
+		default:
+			log.Println("Failed to write to errorChannel")
+		}
+
 		return
 	}
 
-	var data common.SleepResponse
+	var data responses.SleepResponse
 	err = json.NewDecoder(res.Body).Decode(&data)
 
 	if err != nil {
-		errorChannel <- err
+		select {
+		case errorChannel <- err:
+		default:
+			log.Println("Failed to write to errorChannel")
+		}
+
 		return
 	}
 
-	dataChannel <- data.Time
+	select {
+	case dataChannel <- data.Time:
+	default:
+		log.Println("Failed to write to dataChannel, oh well")
+	}
 }
