@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -32,8 +31,8 @@ func apiAllRoute(res http.ResponseWriter, req *http.Request) {
 
 	// validate timeout
 	if timeout < 100 || timeout > 5000 {
-		res.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintln(res, "Incorrect value for timeout specified")
+		http.Error(res, "Incorrect value for timeout specified", http.StatusBadRequest)
+		return
 	}
 
 	dataChannel := make(chan int, 3)
@@ -58,10 +57,15 @@ func apiAllRoute(res http.ResponseWriter, req *http.Request) {
 
 		case <-time.After(time.Duration(timeout) * time.Millisecond):
 			log.Println("The requests did not make it in time, timeout reached")
-			res.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprint(res, "Timeout reached")
+			http.Error(res, "Timeout reached", http.StatusInternalServerError)
 			return
 		}
+	}
+
+	if len(values) == 0 {
+		log.Println("None of the requests was successful")
+		http.Error(res, "All requests failed", http.StatusInternalServerError)
+		return
 	}
 
 	res.Header().Set("Content-Type", "application/json")

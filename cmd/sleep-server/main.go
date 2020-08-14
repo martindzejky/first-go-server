@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
@@ -31,8 +30,7 @@ func sleepHandler(res http.ResponseWriter, req *http.Request) {
 
 	// there's a small chance that the request fails
 	if rand.Float32() < 0.05 {
-		res.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintln(res, "Simulated request failure")
+		http.Error(res, "Simulated request failure", http.StatusBadRequest)
 		return
 	}
 
