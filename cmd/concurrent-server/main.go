@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -25,15 +26,18 @@ func main() {
 
 // handles the /api/all route - it waits for and returns all 3 responses
 func apiAllRoute(res http.ResponseWriter, req *http.Request) {
-	log.Print("Received a request for 'all'")
-
-	timeout := httpUtils.GetQueryIntValue(req.URL.Query(), "timeout", 1000)
+	log.Println("Received a request for 'all'")
 
 	// validate timeout
+	timeout := httpUtils.GetQueryIntValue(req.URL.Query(), "timeout", 1000)
 	if timeout < 100 || timeout > 5000 {
-		http.Error(res, "Incorrect value for timeout specified", http.StatusBadRequest)
+		log.Println("Invalid timeout received:", timeout)
+		http.Error(res, "Incorrect value for timeout specified, it must be 100 < timeout < 5000", http.StatusBadRequest)
 		return
 	}
+
+	// make a new context
+	ctx, _ := context.WithTimeout(req.Context(), time.Duration(timeout)*time.Millisecond)
 
 	dataChannel := make(chan int, 3)
 	errorsChannel := make(chan error, 3)
@@ -55,8 +59,8 @@ func apiAllRoute(res http.ResponseWriter, req *http.Request) {
 		case <-errorsChannel:
 			log.Println("Received an error")
 
-		case <-time.After(time.Duration(timeout) * time.Millisecond):
-			log.Println("The requests did not make it in time, timeout reached")
+		case <-ctx.Done():
+			log.Println("The requests did not make it in time or it was canceled")
 			http.Error(res, "Timeout reached", http.StatusInternalServerError)
 			return
 		}
