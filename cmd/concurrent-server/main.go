@@ -30,6 +30,7 @@ func main() {
 
 	log.Println("Registering request handlers")
 	router.HandleFunc("/api/all", apiAllRouteHandler)
+	router.HandleFunc("/api/first", apiFirstRouteHandler)
 	http.Handle("/", router)
 
 	go func() {
@@ -111,6 +112,66 @@ func apiAllRouteHandler(res http.ResponseWriter, req *http.Request) {
 	res.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(res).Encode(responses.AllResponse{
 		Times: values,
+	})
+}
+
+func apiFirstRouteHandler(res http.ResponseWriter, req *http.Request) {
+	log.Println("Received a request for 'first'")
+
+	// validate timeout
+	timeout := httpUtils.GetQueryIntValue(req.URL.Query(), "timeout", 1000)
+	if timeout < 100 || timeout > 5000 {
+		log.Println("Invalid timeout received:", timeout)
+		http.Error(res, "Incorrect value for timeout specified, it must be 100 < timeout < 5000", http.StatusBadRequest)
+		return
+	}
+
+	// make a new context
+	ctx, cancel := context.WithTimeout(req.Context(), time.Duration(timeout)*time.Millisecond)
+	defer cancel()
+
+	dataChannel := make(chan int, 1)
+	errorsChannel := make(chan error, 3)
+
+	// make the 3 requests
+	for i := 0; i < 3; i++ {
+		log.Println("Making request n.", i)
+		go makeRequestToSleepServer(ctx, dataChannel, errorsChannel)
+	}
+
+	var (
+		result         int
+		receivedResult = false
+		failedRequests int
+	)
+
+	// wait for values
+	for !receivedResult {
+		select {
+		case result = <-dataChannel:
+			receivedResult = true
+			log.Println("Received a value:", result)
+
+		case <-errorsChannel:
+			failedRequests++
+			log.Println("Received an error")
+
+			if failedRequests >= 3 {
+				log.Println("None of the requests was successful")
+				http.Error(res, "All requests failed", http.StatusInternalServerError)
+				return
+			}
+
+		case <-ctx.Done():
+			log.Println("The request failed:", ctx.Err())
+			http.Error(res, "The request failed: "+ctx.Err().Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	res.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(res).Encode(responses.AllResponse{
+		Times: []int{result},
 	})
 }
 
