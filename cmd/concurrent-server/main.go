@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/gorilla/mux"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"time"
 
 	"github.com/martindzejky/first-go-server/internal/http-utils"
@@ -14,18 +17,50 @@ import (
 
 func main() {
 	port := "8081"
+	router := mux.NewRouter()
 
-	// register listeners
-	log.Println("Registering listeners")
-	http.HandleFunc("/api/all", apiAllRoute)
+	log.Println("Creating the server")
+	server := &http.Server{
+		Addr:         "0.0.0.0:" + port,
+		WriteTimeout: time.Second * 15,
+		ReadTimeout:  time.Second * 15,
+		IdleTimeout:  time.Second * 60,
+		Handler:      router,
+	}
 
-	// start the server
-	log.Println("Starting the server on port", port)
-	log.Fatalln(http.ListenAndServe(":"+port, nil))
+	log.Println("Registering request handlers")
+	router.HandleFunc("/api/all", apiAllRouteHandler)
+	http.Handle("/", router)
+
+	go func() {
+		log.Println("Starting the server on port", port)
+		err := server.ListenAndServe()
+
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+
+	// block until the signal is received
+	<-signals
+
+	// make a context to wait for connections
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	log.Println("Gracefully shutting down the server")
+	err := server.Shutdown(ctx)
+
+	if err != nil {
+		log.Fatalln("Error while shutting down the server:", err)
+	}
 }
 
 // handles the /api/all route - it waits for and returns all 3 responses
-func apiAllRoute(res http.ResponseWriter, req *http.Request) {
+func apiAllRouteHandler(res http.ResponseWriter, req *http.Request) {
 	log.Println("Received a request for 'all'")
 
 	// validate timeout
@@ -37,7 +72,8 @@ func apiAllRoute(res http.ResponseWriter, req *http.Request) {
 	}
 
 	// make a new context
-	ctx, _ := context.WithTimeout(req.Context(), time.Duration(timeout)*time.Millisecond)
+	ctx, cancel := context.WithTimeout(req.Context(), time.Duration(timeout)*time.Millisecond)
+	defer cancel()
 
 	dataChannel := make(chan int, 3)
 	errorsChannel := make(chan error, 3)
@@ -46,7 +82,7 @@ func apiAllRoute(res http.ResponseWriter, req *http.Request) {
 	// make the 3 requests
 	for i := 0; i < 3; i++ {
 		log.Println("Making request n.", i)
-		go makeRequestToSleepServer(dataChannel, errorsChannel)
+		go makeRequestToSleepServer(ctx, dataChannel, errorsChannel)
 	}
 
 	// wait for values
@@ -60,8 +96,8 @@ func apiAllRoute(res http.ResponseWriter, req *http.Request) {
 			log.Println("Received an error")
 
 		case <-ctx.Done():
-			log.Println("The requests did not make it in time or it was canceled")
-			http.Error(res, "Timeout reached", http.StatusInternalServerError)
+			log.Println("The request failed:", ctx.Err())
+			http.Error(res, "The request failed: "+ctx.Err().Error(), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -79,9 +115,22 @@ func apiAllRoute(res http.ResponseWriter, req *http.Request) {
 }
 
 // makes a request to the sleeping server
-func makeRequestToSleepServer(dataChannel chan<- int, errorChannel chan<- error) {
-	res, err := http.Get("http://localhost:8080/api/sleep")
+func makeRequestToSleepServer(ctx context.Context, dataChannel chan<- int, errorChannel chan<- error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost:8080/api/sleep", nil)
 
+	if err != nil {
+		select {
+		case errorChannel <- err:
+		default:
+			log.Println("Failed to write to errorChannel")
+		}
+
+		return
+	}
+
+	res, err := http.DefaultClient.Do(req)
+
+	// TODO: copy-pasted code, refactor
 	if err != nil {
 		select {
 		case errorChannel <- err:
