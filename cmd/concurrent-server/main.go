@@ -3,12 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"github.com/gorilla/mux"
+	"github.com/martindzejky/first-go-server/cmd/concurrent-server/requests"
+	osSignals "github.com/martindzejky/first-go-server/internal/os-signals"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
 	"time"
 
 	"github.com/martindzejky/first-go-server/internal/http-utils"
@@ -19,31 +18,21 @@ func main() {
 	port := "8081"
 	router := mux.NewRouter()
 
-	log.Println("Creating the server")
-	server := &http.Server{
-		Addr:         "0.0.0.0:" + port,
-		WriteTimeout: time.Second * 15,
-		ReadTimeout:  time.Second * 15,
-		IdleTimeout:  time.Second * 60,
-		Handler:      router,
-	}
+	server := httpUtils.MakeServer(port, router)
+	signals := osSignals.MakeChannelWithInterruptSignal()
 
 	log.Println("Registering request handlers")
 	router.HandleFunc("/api/all", apiAllRouteHandler)
 	router.HandleFunc("/api/first", apiFirstRouteHandler)
-	http.Handle("/", router)
 
 	go func() {
-		log.Println("Starting the server on port", port)
+		log.Println("Starting the server")
 		err := server.ListenAndServe()
 
 		if err != nil {
 			log.Fatalln(err)
 		}
 	}()
-
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt)
 
 	// block until the signal is received
 	<-signals
@@ -83,7 +72,7 @@ func apiAllRouteHandler(res http.ResponseWriter, req *http.Request) {
 	// make the 3 requests
 	for i := 0; i < 3; i++ {
 		log.Println("Making request n.", i)
-		go makeRequestToSleepServer(ctx, dataChannel, errorsChannel)
+		go requests.MakeRequestToSleepServer(ctx, dataChannel, errorsChannel)
 	}
 
 	// wait for values
@@ -136,7 +125,7 @@ func apiFirstRouteHandler(res http.ResponseWriter, req *http.Request) {
 	// make the 3 requests
 	for i := 0; i < 3; i++ {
 		log.Println("Making request n.", i)
-		go makeRequestToSleepServer(ctx, dataChannel, errorsChannel)
+		go requests.MakeRequestToSleepServer(ctx, dataChannel, errorsChannel)
 	}
 
 	var (
@@ -173,61 +162,4 @@ func apiFirstRouteHandler(res http.ResponseWriter, req *http.Request) {
 	json.NewEncoder(res).Encode(responses.AllResponse{
 		Times: []int{result},
 	})
-}
-
-// makes a request to the sleeping server
-func makeRequestToSleepServer(ctx context.Context, dataChannel chan<- int, errorChannel chan<- error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://localhost:8080/api/sleep", nil)
-
-	if err != nil {
-		select {
-		case errorChannel <- err:
-		default:
-			log.Println("Failed to write to errorChannel")
-		}
-
-		return
-	}
-
-	res, err := http.DefaultClient.Do(req)
-
-	// TODO: copy-pasted code, refactor
-	if err != nil {
-		select {
-		case errorChannel <- err:
-		default:
-			log.Println("Failed to write to errorChannel")
-		}
-
-		return
-	}
-
-	if res.StatusCode != 200 {
-		select {
-		case errorChannel <- errors.New("The sleep server returned an error: " + res.Status):
-		default:
-			log.Println("Failed to write to errorChannel")
-		}
-
-		return
-	}
-
-	var data responses.SleepResponse
-	err = json.NewDecoder(res.Body).Decode(&data)
-
-	if err != nil {
-		select {
-		case errorChannel <- err:
-		default:
-			log.Println("Failed to write to errorChannel")
-		}
-
-		return
-	}
-
-	select {
-	case dataChannel <- data.Time:
-	default:
-		log.Println("Failed to write to dataChannel, oh well")
-	}
 }

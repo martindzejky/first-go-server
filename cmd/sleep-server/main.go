@@ -3,11 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	osSignals "github.com/martindzejky/first-go-server/internal/os-signals"
 	"log"
 	"math/rand"
 	"net/http"
-	"os"
-	"os/signal"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -19,24 +18,17 @@ func main() {
 	port := "8080"
 	router := mux.NewRouter()
 
-	log.Println("Creating the server")
-	server := &http.Server{
-		Addr:         "0.0.0.0:" + port,
-		WriteTimeout: time.Second * 15,
-		ReadTimeout:  time.Second * 15,
-		IdleTimeout:  time.Second * 60,
-		Handler:      router,
-	}
+	server := httpUtils.MakeServer(port, router)
+	signals := osSignals.MakeChannelWithInterruptSignal()
 
 	log.Println("Seeding the random number generator")
 	rand.Seed(time.Now().UnixNano())
 
 	log.Println("Registering request handlers")
 	router.HandleFunc("/api/sleep", sleepHandler)
-	http.Handle("/", router)
 
 	go func() {
-		log.Println("Starting the server on port", port)
+		log.Println("Starting the server")
 		err := server.ListenAndServe()
 
 		if err != nil {
@@ -44,10 +36,7 @@ func main() {
 		}
 	}()
 
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt)
-
-	// block until the signal is received
+	// block until the interrupt signal is received
 	<-signals
 
 	// make a context to wait for connections
