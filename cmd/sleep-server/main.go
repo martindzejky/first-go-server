@@ -63,7 +63,7 @@ func sleepHandler(res http.ResponseWriter, req *http.Request) {
 	// get the sleeping time
 	query := req.URL.Query()
 	min := httpUtils.GetQueryIntValue(query, "min", 100)
-	max := httpUtils.GetQueryIntValue(query, "max", 300)
+	max := httpUtils.GetQueryIntValue(query, "max", 600)
 
 	sleepTime := rand.Intn(max-min) + min
 

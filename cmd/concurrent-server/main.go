@@ -222,52 +222,45 @@ func apiSmartRouteHandler(res http.ResponseWriter, req *http.Request) {
 	}
 
 	// make contexts for the request
-	requestTimeoutCtx, cancelRequestCtx := context.WithTimeout(req.Context(), time.Duration(timeout)*time.Millisecond)
-	firstRequestCtx, cancelFirstRequestCtx := context.WithTimeout(requestTimeoutCtx, 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(req.Context(), time.Duration(timeout)*time.Millisecond)
+	defer cancel()
 
-	defer cancelFirstRequestCtx()
-	defer cancelRequestCtx()
-
-	dataChannel := make(chan int, 1)
-	errorsChannel := make(chan error, 1)
-
-	var result int
-	makeAdditionalRequests := true
+	dataChannel := make(chan int, 3)
+	errorsChannel := make(chan error, 3)
 
 	// make the first request
 	log.Println("Making the first request")
-	requests.MakeRequestToSleepServer(firstRequestCtx, dataChannel, errorsChannel)
+	requests.MakeRequestToSleepServer(ctx, dataChannel, errorsChannel)
 
-	// wait for either the validate or the response
+	// make the other 2 requests after 200ms or after the first request fails
+	go func() {
+		select {
+		case <-errorsChannel:
+		case <-time.After(200 * time.Millisecond):
+		case <-ctx.Done():
+		}
+
+		// if the request has been canceled/finished in the meantime,
+		// do not make the requests
+		if err := ctx.Err(); err != nil {
+			log.Println("Not making additional requests because context error is:", err)
+			return
+		}
+
+		log.Println("Making additional 2 requests")
+		for i := 0; i < 2; i++ {
+			requests.MakeRequestToSleepServer(ctx, dataChannel, errorsChannel)
+		}
+	}()
+
+	// wait for either the timeout or the result
+	var result int
 	select {
 	case result = <-dataChannel:
-		log.Println("Received the response from the first request:", result)
-		makeAdditionalRequests = false
+		log.Println("Received the result:", result)
 
-	case <-errorsChannel:
-	case <-firstRequestCtx.Done():
-	}
-
-	// only make the additional requests if necessary AND if the request
-	// did not reach the timeout yet (or has been canceled)
-	if makeAdditionalRequests && requestTimeoutCtx.Err() == nil {
-		log.Println("Making additional requests")
-
-		for i := 0; i < 2; i++ {
-			requests.MakeRequestToSleepServer(requestTimeoutCtx, dataChannel, errorsChannel)
-		}
-
-		// wait for the result or the timeout
-		select {
-		case result = <-dataChannel:
-			log.Println("Received a result:", result)
-
-		case <-requestTimeoutCtx.Done():
-		}
-	}
-
-	// check whether the request failed
-	if err = requestTimeoutCtx.Err(); err != nil {
+	case <-ctx.Done():
+		err = ctx.Err()
 		log.Println("The request failed:", err)
 		http.Error(res, "The request failed: "+err.Error(), http.StatusInternalServerError)
 		return
