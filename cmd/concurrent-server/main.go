@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/gorilla/mux"
 	"github.com/martindzejky/first-go-server/cmd/concurrent-server/requests"
+	"github.com/martindzejky/first-go-server/cmd/concurrent-server/validate"
 	osSignals "github.com/martindzejky/first-go-server/internal/os-signals"
 	"log"
 	"net/http"
@@ -24,7 +25,8 @@ func main() {
 	log.Println("Registering request handlers")
 	router.HandleFunc("/api/all", apiAllRouteHandler)
 	router.HandleFunc("/api/first", apiFirstRouteHandler)
-	router.HandleFunc("/api/within-timeout", apiWithinTimeoutRouteHandler)
+	router.HandleFunc("/api/within-validate", apiWithinTimeoutRouteHandler)
+	router.HandleFunc("/api/smart", apiSmartRouteHandler)
 
 	go func() {
 		log.Println("Starting the server")
@@ -54,11 +56,9 @@ func main() {
 func apiAllRouteHandler(res http.ResponseWriter, req *http.Request) {
 	log.Println("Received a request for 'all'")
 
-	// validate timeout
-	timeout := httpUtils.GetQueryIntValue(req.URL.Query(), "timeout", 1000)
-	if timeout < 100 || timeout > 5000 {
-		log.Println("Invalid timeout received:", timeout)
-		http.Error(res, "Incorrect value for timeout specified, it must be 100 < timeout < 5000", http.StatusBadRequest)
+	timeout, err := validate.GetAndValidateTimeout(req.URL.Query())
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -109,11 +109,9 @@ func apiAllRouteHandler(res http.ResponseWriter, req *http.Request) {
 func apiFirstRouteHandler(res http.ResponseWriter, req *http.Request) {
 	log.Println("Received a request for 'first'")
 
-	// validate timeout
-	timeout := httpUtils.GetQueryIntValue(req.URL.Query(), "timeout", 1000)
-	if timeout < 100 || timeout > 5000 {
-		log.Println("Invalid timeout received:", timeout)
-		http.Error(res, "Incorrect value for timeout specified, it must be 100 < timeout < 5000", http.StatusBadRequest)
+	timeout, err := validate.GetAndValidateTimeout(req.URL.Query())
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -166,15 +164,13 @@ func apiFirstRouteHandler(res http.ResponseWriter, req *http.Request) {
 	})
 }
 
-// handles the /api/within-timeout route - it returns all responses within the timeout
+// handles the /api/within-validate route - it returns all responses within the validate
 func apiWithinTimeoutRouteHandler(res http.ResponseWriter, req *http.Request) {
-	log.Println("Received a request for 'within-timeout'")
+	log.Println("Received a request for 'within-validate'")
 
-	// validate timeout
-	timeout := httpUtils.GetQueryIntValue(req.URL.Query(), "timeout", 1000)
-	if timeout < 100 || timeout > 5000 {
-		log.Println("Invalid timeout received:", timeout)
-		http.Error(res, "Incorrect value for timeout specified, it must be 100 < timeout < 5000", http.StatusBadRequest)
+	timeout, err := validate.GetAndValidateTimeout(req.URL.Query())
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -212,5 +208,73 @@ func apiWithinTimeoutRouteHandler(res http.ResponseWriter, req *http.Request) {
 	res.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(res).Encode(responses.AllResponse{
 		Times: values,
+	})
+}
+
+// handles the /api/smart route - first request made in 200ms, then 2 more if necessary
+func apiSmartRouteHandler(res http.ResponseWriter, req *http.Request) {
+	log.Println("Received a request for 'smart'")
+
+	timeout, err := validate.GetAndValidateTimeout(req.URL.Query())
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// make contexts for the request
+	requestTimeoutCtx, cancelRequestCtx := context.WithTimeout(req.Context(), time.Duration(timeout)*time.Millisecond)
+	firstRequestCtx, cancelFirstRequestCtx := context.WithTimeout(requestTimeoutCtx, 200*time.Millisecond)
+
+	defer cancelFirstRequestCtx()
+	defer cancelRequestCtx()
+
+	dataChannel := make(chan int, 1)
+	errorsChannel := make(chan error, 1)
+
+	var result int
+	makeAdditionalRequests := true
+
+	// make the first request
+	log.Println("Making the first request")
+	requests.MakeRequestToSleepServer(firstRequestCtx, dataChannel, errorsChannel)
+
+	// wait for either the validate or the response
+	select {
+	case result = <-dataChannel:
+		log.Println("Received the response from the first request:", result)
+		makeAdditionalRequests = false
+
+	case <-errorsChannel:
+	case <-firstRequestCtx.Done():
+	}
+
+	// only make the additional requests if necessary AND if the request
+	// did not reach the timeout yet (or has been canceled)
+	if makeAdditionalRequests && requestTimeoutCtx.Err() == nil {
+		log.Println("Making additional requests")
+
+		for i := 0; i < 2; i++ {
+			requests.MakeRequestToSleepServer(requestTimeoutCtx, dataChannel, errorsChannel)
+		}
+
+		// wait for the result or the timeout
+		select {
+		case result = <-dataChannel:
+			log.Println("Received a result:", result)
+
+		case <-requestTimeoutCtx.Done():
+		}
+	}
+
+	// check whether the request failed
+	if err = requestTimeoutCtx.Err(); err != nil {
+		log.Println("The request failed:", err)
+		http.Error(res, "The request failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	res.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(res).Encode(responses.AllResponse{
+		Times: []int{result},
 	})
 }
