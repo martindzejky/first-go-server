@@ -24,6 +24,7 @@ func main() {
 	log.Println("Registering request handlers")
 	router.HandleFunc("/api/all", apiAllRouteHandler)
 	router.HandleFunc("/api/first", apiFirstRouteHandler)
+	router.HandleFunc("/api/within-timeout", apiWithinTimeoutRouteHandler)
 
 	go func() {
 		log.Println("Starting the server")
@@ -104,6 +105,7 @@ func apiAllRouteHandler(res http.ResponseWriter, req *http.Request) {
 	})
 }
 
+// handles the /api/first route, it returns the first successful response
 func apiFirstRouteHandler(res http.ResponseWriter, req *http.Request) {
 	log.Println("Received a request for 'first'")
 
@@ -161,5 +163,54 @@ func apiFirstRouteHandler(res http.ResponseWriter, req *http.Request) {
 	res.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(res).Encode(responses.AllResponse{
 		Times: []int{result},
+	})
+}
+
+// handles the /api/within-timeout route - it returns all responses within the timeout
+func apiWithinTimeoutRouteHandler(res http.ResponseWriter, req *http.Request) {
+	log.Println("Received a request for 'within-timeout'")
+
+	// validate timeout
+	timeout := httpUtils.GetQueryIntValue(req.URL.Query(), "timeout", 1000)
+	if timeout < 100 || timeout > 5000 {
+		log.Println("Invalid timeout received:", timeout)
+		http.Error(res, "Incorrect value for timeout specified, it must be 100 < timeout < 5000", http.StatusBadRequest)
+		return
+	}
+
+	// make a new context
+	ctx, cancel := context.WithTimeout(req.Context(), time.Duration(timeout)*time.Millisecond)
+	defer cancel()
+
+	dataChannel := make(chan int, 3)
+	values := make([]int, 0)
+
+	// make the 3 requests
+	for i := 0; i < 3; i++ {
+		log.Println("Making request n.", i)
+		go requests.MakeRequestToSleepServer(ctx, dataChannel, nil)
+	}
+
+	doneWaiting := false
+
+	// wait for values
+	for !doneWaiting {
+		select {
+		case data := <-dataChannel:
+			log.Println("Received a value:", data)
+			values = append(values, data)
+
+			if len(values) >= 3 {
+				doneWaiting = true
+			}
+
+		case <-ctx.Done():
+			doneWaiting = true
+		}
+	}
+
+	res.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(res).Encode(responses.AllResponse{
+		Times: values,
 	})
 }
