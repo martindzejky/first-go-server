@@ -221,19 +221,19 @@ func apiSmartRouteHandler(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// make contexts for the request
+	// make context for the request
 	ctx, cancel := context.WithTimeout(req.Context(), time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
 	dataChannel := make(chan int, 3)
 	errorsChannel := make(chan error, 3)
 
-	// make the first request
-	log.Println("Making the first request")
-	requests.MakeRequestToSleepServer(ctx, dataChannel, errorsChannel)
-
-	// make the other 2 requests after 200ms or after the first request fails
 	go func() {
+		// make the first request
+		log.Println("Making the first request")
+		requests.MakeRequestToSleepServer(ctx, dataChannel, errorsChannel)
+
+		// make the other 2 requests after 200ms or after the first request fails
 		select {
 		case <-errorsChannel:
 		case <-time.After(200 * time.Millisecond):
@@ -260,7 +260,7 @@ func apiSmartRouteHandler(res http.ResponseWriter, req *http.Request) {
 		log.Println("Received the result:", result)
 
 	case <-ctx.Done():
-		err = ctx.Err()
+		err := ctx.Err()
 		log.Println("The request failed:", err)
 		http.Error(res, "The request failed: "+err.Error(), http.StatusInternalServerError)
 		return
