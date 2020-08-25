@@ -2,6 +2,7 @@ package httpUtils
 
 import (
 	"context"
+	"crypto/tls"
 	"log"
 	"net/http"
 	"time"
@@ -12,11 +13,33 @@ import (
 func RunServer(port string, handler http.Handler) {
 	log.Println("Creating the server on port", port)
 
+	// configure tls
+	// https://blog.cloudflare.com/exposing-go-on-the-internet/
+	tlsConfig := &tls.Config{
+		PreferServerCipherSuites: true,
+		CurvePreferences: []tls.CurveID{
+			tls.CurveP256,
+			tls.X25519, // Go 1.8 only
+		},
+
+		MinVersion: tls.VersionTLS12,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+		},
+	}
+
+	// make the server
 	server := &http.Server{
 		Addr:         ":" + port,
-		WriteTimeout: time.Second * 15,
-		ReadTimeout:  time.Second * 15,
+		ReadTimeout:  time.Second * 5,
+		WriteTimeout: time.Second * 10,
 		IdleTimeout:  time.Second * 60,
+		TLSConfig:    tlsConfig,
 		Handler:      handler,
 	}
 
