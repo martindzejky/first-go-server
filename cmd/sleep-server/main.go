@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	osSignals "github.com/martindzejky/first-go-server/internal/os-signals"
 	"log"
 	"math/rand"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/martindzejky/first-go-server/internal/http-utils"
+	"github.com/martindzejky/first-go-server/internal/os-signals"
 	"github.com/martindzejky/first-go-server/internal/responses"
 )
 

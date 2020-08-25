@@ -3,15 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"github.com/gorilla/mux"
-	"github.com/martindzejky/first-go-server/cmd/concurrent-server/requests"
-	"github.com/martindzejky/first-go-server/cmd/concurrent-server/validate"
-	osSignals "github.com/martindzejky/first-go-server/internal/os-signals"
 	"log"
 	"net/http"
 	"time"
 
+	"github.com/gorilla/mux"
+	"github.com/martindzejky/first-go-server/cmd/concurrent-server/requests"
+	"github.com/martindzejky/first-go-server/cmd/concurrent-server/validate"
 	"github.com/martindzejky/first-go-server/internal/http-utils"
+	"github.com/martindzejky/first-go-server/internal/os-signals"
 	"github.com/martindzejky/first-go-server/internal/responses"
 )
 
@@ -25,7 +25,7 @@ func main() {
 	log.Println("Registering request handlers")
 	router.HandleFunc("/api/all", apiAllRouteHandler)
 	router.HandleFunc("/api/first", apiFirstRouteHandler)
-	router.HandleFunc("/api/within-validate", apiWithinTimeoutRouteHandler)
+	router.HandleFunc("/api/within-timeout", apiWithinTimeoutRouteHandler)
 	router.HandleFunc("/api/smart", apiSmartRouteHandler)
 
 	go func() {
@@ -164,7 +164,7 @@ func apiFirstRouteHandler(res http.ResponseWriter, req *http.Request) {
 	})
 }
 
-// handles the /api/within-validate route - it returns all responses within the validate
+// handles the /api/within-timeout route - it returns all responses within the timeout
 func apiWithinTimeoutRouteHandler(res http.ResponseWriter, req *http.Request) {
 	log.Println("Received a request for 'within-validate'")
 
@@ -225,13 +225,13 @@ func apiSmartRouteHandler(res http.ResponseWriter, req *http.Request) {
 	ctx, cancel := context.WithTimeout(req.Context(), time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
-	dataChannel := make(chan int, 3)
+	dataChannel := make(chan int, 1)
 	errorsChannel := make(chan error, 3)
 
 	go func() {
 		// make the first request
 		log.Println("Making the first request")
-		requests.MakeRequestToSleepServer(ctx, dataChannel, errorsChannel)
+		go requests.MakeRequestToSleepServer(ctx, dataChannel, errorsChannel)
 
 		// make the other 2 requests after 200ms or after the first request fails
 		select {
@@ -249,7 +249,7 @@ func apiSmartRouteHandler(res http.ResponseWriter, req *http.Request) {
 
 		log.Println("Making additional 2 requests")
 		for i := 0; i < 2; i++ {
-			requests.MakeRequestToSleepServer(ctx, dataChannel, errorsChannel)
+			go requests.MakeRequestToSleepServer(ctx, dataChannel, errorsChannel)
 		}
 	}()
 
