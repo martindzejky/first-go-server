@@ -1,54 +1,26 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"math/rand"
 	"net/http"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/martindzejky/first-go-server/internal/http-utils"
-	"github.com/martindzejky/first-go-server/internal/os-signals"
 	"github.com/martindzejky/first-go-server/internal/responses"
 )
 
 func main() {
-	port := "8080"
-	router := mux.NewRouter()
-
-	server := httpUtils.MakeServer(port, router)
-	signals := osSignals.MakeChannelWithInterruptSignal()
-
 	log.Println("Seeding the random number generator")
 	rand.Seed(time.Now().UnixNano())
 
-	log.Println("Registering request handlers")
-	router.HandleFunc("/api/sleep", sleepHandler)
+	port := "8080"
+	mux := http.NewServeMux()
 
-	go func() {
-		log.Println("Starting the server")
-		err := server.ListenAndServe()
+	mux.HandleFunc("/api/sleep", sleepHandler)
 
-		if err != nil {
-			log.Fatalln(err)
-		}
-	}()
-
-	// block until the interrupt signal is received
-	<-signals
-
-	// make a context to wait for connections
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	log.Println("Gracefully shutting down the server")
-	err := server.Shutdown(ctx)
-
-	if err != nil {
-		log.Fatalln("Error while shutting down the server:", err)
-	}
+	httpUtils.RunServer(port, mux)
 }
 
 func sleepHandler(res http.ResponseWriter, req *http.Request) {

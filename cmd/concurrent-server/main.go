@@ -7,49 +7,23 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/martindzejky/first-go-server/cmd/concurrent-server/requests"
 	"github.com/martindzejky/first-go-server/cmd/concurrent-server/validate"
 	"github.com/martindzejky/first-go-server/internal/http-utils"
-	"github.com/martindzejky/first-go-server/internal/os-signals"
 	"github.com/martindzejky/first-go-server/internal/responses"
 )
 
 func main() {
 	port := "8081"
-	router := mux.NewRouter()
-
-	server := httpUtils.MakeServer(port, router)
-	signals := osSignals.MakeChannelWithInterruptSignal()
+	mux := http.NewServeMux()
 
 	log.Println("Registering request handlers")
-	router.HandleFunc("/api/all", apiAllRouteHandler)
-	router.HandleFunc("/api/first", apiFirstRouteHandler)
-	router.HandleFunc("/api/within-timeout", apiWithinTimeoutRouteHandler)
-	router.HandleFunc("/api/smart", apiSmartRouteHandler)
+	mux.HandleFunc("/api/all", apiAllRouteHandler)
+	mux.HandleFunc("/api/first", apiFirstRouteHandler)
+	mux.HandleFunc("/api/within-timeout", apiWithinTimeoutRouteHandler)
+	mux.HandleFunc("/api/smart", apiSmartRouteHandler)
 
-	go func() {
-		log.Println("Starting the server")
-		err := server.ListenAndServe()
-
-		if err != nil {
-			log.Fatalln(err)
-		}
-	}()
-
-	// block until the signal is received
-	<-signals
-
-	// make a context to wait for connections
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	log.Println("Gracefully shutting down the server")
-	err := server.Shutdown(ctx)
-
-	if err != nil {
-		log.Fatalln("Error while shutting down the server:", err)
-	}
+	httpUtils.RunServer(port, mux)
 }
 
 // handles the /api/all route - it waits for and returns all 3 responses
